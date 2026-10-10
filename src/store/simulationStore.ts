@@ -58,6 +58,8 @@ const PHASE_ORDER: SimulationPhase[] = [
 ];
 
 const STORAGE_KEY = "meho.simulation.v1";
+const CROWD_INCIDENT_HYSTERESIS_PERCENT = 5;
+const AUTO_THRESHOLD_INCIDENT_TAG = "[AUTO_THRESHOLD]";
 
 const initialGates = venueGatesNormal;
 const initialRoutes = resolveRoutes(transportSnapshotsNormal);
@@ -429,6 +431,28 @@ export const useSimulationStore = create<SimulationState>()(
           state.predictions
         );
 
+        if (routingResult.noSafeAlternative) {
+          const currentUpdated =
+            routingResult.candidates.find((c) => c.id === aj.currentRoute?.id) ?? aj.currentRoute;
+          const currentCost = currentUpdated?.totalRouteCost ?? aj.currentRouteCost;
+          set((s) => ({
+            activeJourney: {
+              ...s.activeJourney,
+              currentRoute: currentUpdated,
+              currentRouteCost: currentCost,
+              rerouteAvailable: false,
+              rerouteReason: null,
+              pendingAlternativeRoute: null,
+              lastEvaluatedAt: new Date().toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              }),
+            },
+          }));
+          return;
+        }
+
         const bestAlternative = routingResult.recommendedRoute;
         const currentRouteId = aj.currentRoute.id;
         const currentUpdated =
@@ -701,6 +725,12 @@ export const useSimulationStore = create<SimulationState>()(
 
       updateZoneCrowdState: (zoneId, statePatch) => {
         set((state) => {
+          const eventConfig = EVENT_CONFIGS[state.activeEventConfigId] ?? EVENT_CONFIGS["kumbh-mela"];
+          const criticalThreshold = eventConfig.thresholds.criticalPressure;
+          const recoveryThreshold = Math.max(
+            0,
+            criticalThreshold - CROWD_INCIDENT_HYSTERESIS_PERCENT
+          );
           const prev = state.liveCrowdStates[zoneId] ?? {
             zoneId,
             peopleCount: 0,
@@ -716,18 +746,148 @@ export const useSimulationStore = create<SimulationState>()(
             ...state.liveCrowdStates,
             [zoneId]: { ...prev, ...statePatch },
           };
-          return { liveCrowdStates: nextLive };
+          const nextZoneState = nextLive[zoneId];
+          const nextPressure = Math.max(0, Math.min(100, Math.round(nextZoneState.occupancyPercent)));
+
+          const autoIncidents = state.incidents.filter(
+            (inc) =>
+              inc.type === "crowd" &&
+              inc.zoneId === zoneId &&
+              inc.description.includes(AUTO_THRESHOLD_INCIDENT_TAG) &&
+              inc.status !== "resolved"
+          );
+
+          let nextIncidents = state.incidents;
+          if (nextPressure >= criticalThreshold) {
+            if (autoIncidents.length === 0) {
+              const zoneName =
+                EVENT_CONFIGS[state.activeEventConfigId]?.zones.find((z) => z.id === zoneId)?.name ??
+                zoneId.toUpperCase();
+              const newIncident: Incident = {
+                id: `inc-${Date.now()}`,
+                type: "crowd",
+                zoneId,
+                severity: "critical",
+                status: "open",
+                description: `${AUTO_THRESHOLD_INCIDENT_TAG} ${zoneName} at ${nextPressure}% occupancy exceeded critical threshold (${criticalThreshold}%).`,
+              };
+              nextIncidents = [newIncident, ...state.incidents];
+            } else if (autoIncidents.length > 1) {
+              const keepId = autoIncidents[0].id;
+              nextIncidents = state.incidents.map((inc) =>
+                autoIncidents.some((ai) => ai.id === inc.id) && inc.id !== keepId
+                  ? { ...inc, status: "resolved" }
+                  : inc
+              );
+            }
+          } else if (nextPressure <= recoveryThreshold && autoIncidents.length > 0) {
+            nextIncidents = state.incidents.map((inc) =>
+              autoIncidents.some((ai) => ai.id === inc.id)
+                ? { ...inc, status: "resolved" }
+                : inc
+            );
+          }
+
+          const nextSnapshots = state.zoneSnapshots.map((snap) =>
+            snap.zoneId === zoneId
+              ? {
+                  ...snap,
+                  crowdPressure: nextPressure,
+                  accommodationPressure: nextPressure,
+                }
+              : snap
+          );
+
+          return {
+            liveCrowdStates: nextLive,
+            incidents: nextIncidents,
+            zoneSnapshots: nextSnapshots,
+          };
         });
         get().recalculatePredictions();
       },
 
       updateAllZoneCrowdStates: (newStates) => {
-        set((state) => ({
-          liveCrowdStates: {
+        set((state) => {
+          const eventConfig = EVENT_CONFIGS[state.activeEventConfigId] ?? EVENT_CONFIGS["kumbh-mela"];
+          const criticalThreshold = eventConfig.thresholds.criticalPressure;
+          const recoveryThreshold = Math.max(
+            0,
+            criticalThreshold - CROWD_INCIDENT_HYSTERESIS_PERCENT
+          );
+
+          const mergedStates = {
             ...state.liveCrowdStates,
             ...newStates,
-          },
-        }));
+          };
+          const zoneIds = Object.keys(newStates);
+
+          const nextSnapshots = state.zoneSnapshots.map((snap) => {
+            if (!zoneIds.includes(snap.zoneId)) return snap;
+            const pressure = Math.max(
+              0,
+              Math.min(100, Math.round(mergedStates[snap.zoneId]?.occupancyPercent ?? snap.crowdPressure))
+            );
+            return {
+              ...snap,
+              crowdPressure: pressure,
+              accommodationPressure: pressure,
+            };
+          });
+
+          let nextIncidents = state.incidents;
+          zoneIds.forEach((zoneId) => {
+            const pressure = Math.max(
+              0,
+              Math.min(100, Math.round(mergedStates[zoneId]?.occupancyPercent ?? 0))
+            );
+            const autoIncidents = nextIncidents.filter(
+              (inc) =>
+                inc.type === "crowd" &&
+                inc.zoneId === zoneId &&
+                inc.description.includes(AUTO_THRESHOLD_INCIDENT_TAG) &&
+                inc.status !== "resolved"
+            );
+
+            if (pressure >= criticalThreshold) {
+              if (autoIncidents.length === 0) {
+                const zoneName =
+                  EVENT_CONFIGS[state.activeEventConfigId]?.zones.find((z) => z.id === zoneId)?.name ??
+                  zoneId.toUpperCase();
+                nextIncidents = [
+                  {
+                    id: `inc-${Date.now()}-${zoneId}`,
+                    type: "crowd",
+                    zoneId,
+                    severity: "critical",
+                    status: "open",
+                    description: `${AUTO_THRESHOLD_INCIDENT_TAG} ${zoneName} at ${pressure}% occupancy exceeded critical threshold (${criticalThreshold}%).`,
+                  },
+                  ...nextIncidents,
+                ];
+              } else if (autoIncidents.length > 1) {
+                const keepId = autoIncidents[0].id;
+                nextIncidents = nextIncidents.map((inc) =>
+                  autoIncidents.some((ai) => ai.id === inc.id) && inc.id !== keepId
+                    ? { ...inc, status: "resolved" }
+                    : inc
+                );
+              }
+            } else if (pressure <= recoveryThreshold && autoIncidents.length > 0) {
+              nextIncidents = nextIncidents.map((inc) =>
+                autoIncidents.some((ai) => ai.id === inc.id)
+                  ? { ...inc, status: "resolved" }
+                  : inc
+              );
+            }
+          });
+
+          return {
+            liveCrowdStates: mergedStates,
+            incidents: nextIncidents,
+            zoneSnapshots: nextSnapshots,
+          };
+        });
         get().recalculatePredictions();
       },
 
@@ -939,11 +1099,22 @@ export const useSimulationStore = create<SimulationState>()(
       },
 
       addIncident: (inc) => {
-        const newIncident: Incident = {
-          ...inc,
-          id: `inc-${Date.now()}`,
-        };
-        set((state) => ({ incidents: [newIncident, ...state.incidents] }));
+        set((state) => {
+          const duplicate = state.incidents.some(
+            (existing) =>
+              existing.zoneId === inc.zoneId &&
+              existing.type === inc.type &&
+              existing.status !== "resolved" &&
+              existing.description === inc.description
+          );
+          if (duplicate) return state;
+
+          const newIncident: Incident = {
+            ...inc,
+            id: `inc-${Date.now()}`,
+          };
+          return { incidents: [newIncident, ...state.incidents] };
+        });
       },
 
       acknowledgeIncident: (id) => {

@@ -269,6 +269,8 @@ export type EventAwareRoutingResult = {
   destinationZoneId: string;
   recommendedRoute: EventAwareRouteCandidate;
   candidates: EventAwareRouteCandidate[];
+  noSafeAlternative: boolean;
+  noSafeAlternativeReason: string | null;
   lastUpdated: string;
 };
 

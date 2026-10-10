@@ -24,6 +24,9 @@ muted, looped and autoplayed, and are decoration around the analytics, not the
 analytics themselves. A few seconds at 720p is plenty; large files slow the
 demo down and count against the deployment size.
 
+For the HACKCELESTIAL workflow demo, keep each clip **under 120 seconds**. The
+camera analyzer rejects clips that are 120s or longer.
+
 ## Sourcing
 
 Only use footage you have the right to use:
@@ -42,3 +45,6 @@ player.
 This is the shipped state. Every camera renders a labelled **Simulated camera
 feed** panel and all the analytics still work. The same fallback catches a
 registered file that fails to load, so a missing asset can never break a demo.
+
+When fallback replay is used, counts are labeled `SIMULATED` / manual replay and
+must not be interpreted as AI-detected headcounts.

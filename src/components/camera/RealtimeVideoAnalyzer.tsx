@@ -68,6 +68,8 @@ export const ALL_CAMERA_CONFIGS: MultiCameraConfig[] = [
   },
 ];
 
+const MAX_INPUT_VIDEO_DURATION_SECONDS = 120;
+
 type CameraRuntimeMetrics = {
   tracks: RealtimeTrack[];
   detections: DetectedPerson[];
@@ -82,6 +84,7 @@ type CameraRuntimeMetrics = {
 export function RealtimeVideoAnalyzer() {
   const [selectedCamId, setSelectedCamId] = useState<string>("cam-07");
   const [isEngineReady, setIsEngineReady] = useState(false);
+  const [engineStatusMessage, setEngineStatusMessage] = useState<string | null>(null);
 
   // Per-camera analysis toggle (ON/OFF)
   const [analysisEnabled, setAnalysisEnabled] = useState<Record<string, boolean>>({
@@ -97,6 +100,12 @@ export function RealtimeVideoAnalyzer() {
     "cam-03": true,
     "cam-12": true,
     "cam-04": false, // Checked dynamically on load
+  });
+  const [videoIssue, setVideoIssue] = useState<Record<string, string | null>>({
+    "cam-07": null,
+    "cam-03": null,
+    "cam-12": null,
+    "cam-04": null,
   });
 
   // Per-camera telemetry state
@@ -135,6 +144,11 @@ export function RealtimeVideoAnalyzer() {
     globalVideoPerceptionEngine.initializeModel().then((success) => {
       if (isMounted) {
         setIsEngineReady(success);
+        setEngineStatusMessage(
+          success
+            ? null
+            : "COCO-SSD model weights are currently unavailable. REAL_VIDEO inference is paused; use deterministic replay controls."
+        );
       }
     });
 
@@ -145,13 +159,41 @@ export function RealtimeVideoAnalyzer() {
   }, []);
 
   // Monitor Video Loading Errors per camera (Part N & P)
-  const handleVideoError = useCallback((cameraId: string) => {
+  const handleVideoError = useCallback((cameraId: string, reason?: string) => {
     setVideoAvailable((prev) => ({ ...prev, [cameraId]: false }));
+    setVideoIssue((prev) => ({
+      ...prev,
+      [cameraId]:
+        reason ??
+        "Camera clip missing or unsupported. Provide a local MP4 (H.264/AAC) under /public/media/cameras.",
+    }));
+  }, []);
+
+  const validateCameraMedia = useCallback((cameraId: string) => {
+    const video = videoRefs.current[cameraId];
+    if (!video) return;
+
+    const duration = Number(video.duration);
+    if (Number.isFinite(duration) && duration >= MAX_INPUT_VIDEO_DURATION_SECONDS) {
+      setVideoAvailable((prev) => ({ ...prev, [cameraId]: false }));
+      setVideoIssue((prev) => ({
+        ...prev,
+        [cameraId]: `Rejected: ${duration.toFixed(1)}s clip exceeds ${MAX_INPUT_VIDEO_DURATION_SECONDS}s limit for demo input.`,
+      }));
+      return;
+    }
+
+    setVideoAvailable((prev) => ({ ...prev, [cameraId]: true }));
+    setVideoIssue((prev) => ({ ...prev, [cameraId]: null }));
   }, []);
 
   const handleVideoLoadedData = useCallback((cameraId: string) => {
-    setVideoAvailable((prev) => ({ ...prev, [cameraId]: true }));
-  }, []);
+    validateCameraMedia(cameraId);
+  }, [validateCameraMedia]);
+
+  const handleVideoLoadedMetadata = useCallback((cameraId: string) => {
+    validateCameraMedia(cameraId);
+  }, [validateCameraMedia]);
 
   // Multi-Camera Scheduled Perception Loop
   useEffect(() => {
@@ -312,9 +354,9 @@ export function RealtimeVideoAnalyzer() {
   };
 
   // Compute Overall Multi-Camera Perception Status (Part O)
-  const activeAnalyzingCount = ALL_CAMERA_CONFIGS.filter(
-    (c) => analysisEnabled[c.id] && videoAvailable[c.id]
-  ).length;
+  const activeAnalyzingCount = isEngineReady
+    ? ALL_CAMERA_CONFIGS.filter((c) => analysisEnabled[c.id] && videoAvailable[c.id]).length
+    : 0;
   const totalDetections = Object.values(cameraMetrics).reduce(
     (sum, m) => sum + m.tracks.length,
     0
@@ -342,6 +384,12 @@ export function RealtimeVideoAnalyzer() {
 
   return (
     <div className="rounded-xl border border-border bg-surface shadow-xl overflow-hidden space-y-4 p-5">
+      {engineStatusMessage && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+          {engineStatusMessage}
+        </div>
+      )}
+
       {/* Background HTML5 Video Elements Decoding All Cameras Simultaneously */}
       <div className="hidden pointer-events-none" aria-hidden="true">
         {ALL_CAMERA_CONFIGS.map((cam) => (
@@ -357,6 +405,7 @@ export function RealtimeVideoAnalyzer() {
             playsInline
             onError={() => handleVideoError(cam.id)}
             onLoadedData={() => handleVideoLoadedData(cam.id)}
+            onLoadedMetadata={() => handleVideoLoadedMetadata(cam.id)}
           />
         ))}
       </div>
@@ -454,7 +503,7 @@ export function RealtimeVideoAnalyzer() {
               {selectedCamConfig.id.toUpperCase()} FEED OFFLINE
             </span>
             <span className="text-xs text-foreground-muted">
-              Source file unavailable: {selectedCamConfig.src}
+              {videoIssue[selectedCamId] ?? `Source file unavailable: ${selectedCamConfig.src}`}
             </span>
             <span className="text-[10px] text-amber-400/80 font-mono mt-1">
               No live CV telemetry emitted for offline feeds
@@ -582,7 +631,10 @@ export function RealtimeVideoAnalyzer() {
                     </td>
 
                     <td className="px-3 py-2.5 font-mono text-[10px] text-foreground-muted">
-                      {cam.src}
+                      <div>{cam.src}</div>
+                      {videoIssue[cam.id] && (
+                        <div className="mt-1 text-[10px] text-amber-400">{videoIssue[cam.id]}</div>
+                      )}
                     </td>
 
                     <td className="px-3 py-2.5 font-mono">{statusBadge}</td>
