@@ -152,6 +152,13 @@ Pravaah explicitly categorizes all operational data using provenance badges:
 - **`eventAuthoringStore.ts`**: Spatial event authoring models (zones, gates, route polylines). Saved in `localStorage`.
 - **Synchronization Bridge**: `TransportSyncBridge.tsx` connects Zustand stores via browser `BroadcastChannel("pravaah_sim_sync")` for same-browser tabs and `/api/simulation/stream` (Server-Sent Events) for cross-device updates.
 
+### HACKCELESTIAL Quick-Demo Input Strategy
+- **Primary mode (`REAL_VIDEO`)**: Browser-side TF.js COCO-SSD inference from local MP4 camera clips.
+- **Fallback mode (`SIMULATED` / manual replay)**: Deterministic operator-triggered count replay for threshold/red-zone/diversion workflow testing.
+- **Honesty rule**: Manual replay values are clearly labeled `SIMULATED`; they are not presented as AI detections.
+- **Video guardrail**: Input clips with duration **≥ 120 seconds** are rejected in the camera analyzer with a user-facing error.
+- **Failure handling**: Missing/unsupported media or unavailable model weights show explicit warnings and keep fallback replay available.
+
 ---
 
 ## Maps and Camera Intelligence

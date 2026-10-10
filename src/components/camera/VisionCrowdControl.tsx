@@ -5,7 +5,7 @@ import { VisionCrowdProvider, type RawVisionTelemetry } from "@/lib/adapters/cro
 import { useSimulationStore } from "@/store/simulationStore";
 
 export function VisionCrowdControl() {
-  const [visionMode, setVisionMode] = useState<"simulation" | "vision_adapter">("simulation");
+  const [visionMode, setVisionMode] = useState<"simulation" | "manual_replay">("simulation");
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [telemetryLog, setTelemetryLog] = useState<RawVisionTelemetry | null>(null);
 
@@ -28,7 +28,7 @@ export function VisionCrowdControl() {
       model: "yolo11",
       confidencePercent: highDensity ? 96 : 94,
       trackIds,
-      source: "CV",
+      source: "SIMULATED",
     };
 
     provider.ingestVisionTelemetry(rawData);
@@ -45,7 +45,7 @@ export function VisionCrowdControl() {
       crowdLevel: highDensity ? "CRITICAL" : "LOW",
       trend: highDensity ? "INCREASING" : "DECREASING",
       confidencePercent: 96,
-      source: "CV",
+      source: "SIMULATED",
       anonymousTrackIds: trackIds,
     });
 
@@ -72,11 +72,11 @@ export function VisionCrowdControl() {
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-semibold text-foreground">Crowd Telemetry Boundary</h3>
             <span className="rounded-full bg-accent-glow/15 px-2.5 py-0.5 text-[10px] uppercase font-bold text-accent-glow border border-accent-glow/30">
-              Provider: {visionMode === "simulation" ? "Simulation Engine" : "Vision Adapter (YOLO Contract)"}
+              Provider: {visionMode === "simulation" ? "Simulation Engine" : "Manual Replay (Deterministic)"}
             </span>
           </div>
           <p className="text-xs text-foreground-muted mt-0.5">
-            Normalized crowd metrics entering Pravaah via CrowdDataProvider abstraction
+            Explicit fallback for demo control-flow validation. These values are operator-triggered and not AI detections.
           </p>
         </div>
 
@@ -96,21 +96,21 @@ export function VisionCrowdControl() {
           </button>
           <button
             onClick={() => {
-              setVisionMode("vision_adapter");
+              setVisionMode("manual_replay");
               triggerVisionIngest(true);
             }}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
-              visionMode === "vision_adapter"
+              visionMode === "manual_replay"
                 ? "bg-accent-glow/20 text-accent-glow border border-accent-glow/40"
                 : "text-foreground-muted hover:text-foreground"
             }`}
           >
-            Vision Telemetry Adapter
+            Manual Count Replay
           </button>
         </div>
       </div>
 
-      {visionMode === "vision_adapter" && (
+      {visionMode === "manual_replay" && (
         <div className="space-y-3 bg-surface/50 rounded-lg p-4 border border-surface-border/60">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2">
@@ -119,7 +119,7 @@ export function VisionCrowdControl() {
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
               <span className="text-xs font-medium text-foreground">
-                Vision Adapter Active (Injected Telemetry Mode)
+                Manual Replay Active (SIMULATED source)
               </span>
             </div>
             <div className="flex gap-2">
@@ -128,14 +128,14 @@ export function VisionCrowdControl() {
                 onClick={() => triggerVisionIngest(true)}
                 className="rounded-md bg-status-critical/20 hover:bg-status-critical/30 text-status-critical text-xs px-3 py-1 font-semibold transition-colors disabled:opacity-50"
               >
-                {isProcessing ? "Processing Telemetry..." : "Inject High Density (3.25 p/m²)"}
+                {isProcessing ? "Replaying..." : "Replay Breach Count"}
               </button>
               <button
                 disabled={isProcessing}
                 onClick={() => triggerVisionIngest(false)}
                 className="rounded-md bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 text-xs px-3 py-1 font-semibold transition-colors disabled:opacity-50"
               >
-                Clear Density Spike
+                Replay Recovery Count
               </button>
             </div>
           </div>
@@ -157,6 +157,7 @@ export function VisionCrowdControl() {
               <div className="bg-background/80 p-2 rounded border border-surface-border">
                 <span className="text-[10px] text-foreground-muted block">Contract Format</span>
                 <strong className="text-accent-glow">{telemetryLog.model.toUpperCase()} Contract</strong>
+                <div className="text-[10px] text-amber-300 mt-1">Label: SIMULATED / MANUAL_REPLAY</div>
               </div>
             </div>
           )}

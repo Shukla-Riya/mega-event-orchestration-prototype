@@ -54,6 +54,7 @@ export default function JourneyPlannerPage() {
   const altCandidate = eventRouting?.candidates?.find(
     (c) => c.id !== eventRouting.recommendedRoute?.id
   );
+  const hasNoSafeAlternative = eventRouting?.noSafeAlternative ?? false;
 
   return (
     <div>
@@ -133,7 +134,7 @@ export default function JourneyPlannerPage() {
         </Card>
 
         {/* EVENT-AWARE ROUTE SELECTION CARD */}
-        {eventRouting && eventRouting.recommendedRoute && (
+        {eventRouting && eventRouting.recommendedRoute && !hasNoSafeAlternative && (
           <Card className="border-risk-low/30 bg-risk-low-bg p-4">
             <div className="flex items-start gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-risk-low/15 text-risk-low">
@@ -196,6 +197,30 @@ export default function JourneyPlannerPage() {
                     );
                   })}
                 </div>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {eventRouting?.noSafeAlternative && (
+          <Card className="border-risk-high/30 bg-risk-high-bg p-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-risk-high/15 text-risk-high">
+                <Navigation className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-risk-high">No Safe Alternative Route</span>
+                  <Chip tone="warning">Operator Attention Required</Chip>
+                </div>
+                <p className="mt-1 text-sm font-semibold text-foreground">
+                  {eventRouting.noSafeAlternativeReason}
+                </p>
+                <p className="mt-1 text-xs leading-relaxed text-foreground-muted">
+                  Least-risk fallback currently available:{" "}
+                  <span className="font-semibold text-foreground">{eventRouting.recommendedRoute.name}</span>{" "}
+                  ({eventRouting.recommendedRoute.effectiveEtaMinutes} min · {eventRouting.recommendedRoute.distanceMeters}m).
+                </p>
               </div>
             </div>
           </Card>

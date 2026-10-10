@@ -331,12 +331,23 @@ export function calculateEventAwareRoutes(
     curr.distanceMeters < prev.distanceMeters ? curr : prev
   );
 
-  const best = scoredCandidates[0];
-  best.status = "recommended";
+  const safeCandidates = scoredCandidates.filter(
+    (cand) =>
+      cand.dominantCrowdLevel !== "CRITICAL" &&
+      cand.dominantCrowdLevel !== "HIGH" &&
+      cand.predictedRiskLevel !== "CRITICAL" &&
+      cand.predictedRiskLevel !== "HIGH" &&
+      cand.incidentPenalty === 0
+  );
+  const noSafeAlternative = safeCandidates.length === 0;
+  const best = noSafeAlternative ? scoredCandidates[0] : safeCandidates[0];
+  if (!noSafeAlternative) {
+    best.status = "recommended";
+  }
 
   // Build human-readable explainability
   scoredCandidates.forEach((cand) => {
-    if (cand.id === best.id) {
+    if (cand.id === best.id && !noSafeAlternative) {
       if (best.id === shortestRaw.id) {
         cand.explanation = `Recommended as the fastest direct route (${best.effectiveEtaMinutes} min, ${best.distanceMeters}m) with low corridor crowd density.`;
       } else {
@@ -344,6 +355,9 @@ export function calculateEventAwareRoutes(
         const distDiff = cand.distanceMeters - shortestRaw.distanceMeters;
         cand.explanation = `Recommended route: ~${Math.max(1, Math.abs(timeDiff))} min longer (+${distDiff}m), but avoids ${shortestRaw.dominantCrowdLevel} crowd congestion on ${shortestRaw.name}.`;
       }
+    } else if (cand.id === best.id && noSafeAlternative) {
+      cand.status = "congested";
+      cand.explanation = `No currently safe corridor is available. This is the least-risk fallback (${cand.effectiveEtaMinutes} min, ${cand.distanceMeters}m) and still requires on-ground operator control.`;
     } else {
       const costDiff = cand.totalRouteCost - best.totalRouteCost;
       cand.status = cand.dominantCrowdLevel === "CRITICAL" ? "congested" : "alternative";
@@ -356,6 +370,10 @@ export function calculateEventAwareRoutes(
     destinationZoneId,
     recommendedRoute: best,
     candidates: scoredCandidates,
+    noSafeAlternative,
+    noSafeAlternativeReason: noSafeAlternative
+      ? "All currently available route candidates are high-risk, predicted high-risk, or incident-impacted."
+      : null,
     lastUpdated: new Date().toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
